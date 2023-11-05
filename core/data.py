@@ -203,16 +203,22 @@ class Dataset(data.Dataset):
     def get_item(self, pdb_key):
         example = {}
 
-        if self.pdb_path.endswith("cath_s40_dataset"):  # CATH pdbs
-            data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
-        elif self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
-            data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
-        else:
-            raise Exception("Invalid pdb path.")
+        data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
+        conf_file = f"{self.pdb_path}/confs/{pdb_key}"
+
+        # if self.pdb_path.endswith("cath_s40_dataset"):  # CATH pdbs
+        #     data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
+        # elif self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
+        #     data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
+        # else:
+        #     raise Exception("Invalid pdb path.")
 
         try:
             example = utils.load_feats_from_pdb(data_file)
             coords_in = example["atom_positions"]
+
+            conf = np.load(conf_file)
+            
         except FileNotFoundError:
             raise Exception(f"File {pdb_key} not found. Check if dataset is corrupted?")
         except RuntimeError:
@@ -225,6 +231,8 @@ class Dataset(data.Dataset):
         orig_size = coords_in.shape[0]
         example["coords_in"] = coords_in
         example["orig_size"] = torch.ones(1) * orig_size
+        example["conf"] = torch.Tensor(conf)
+        example['dataset_id'] = torch.Tensor(np.array(pdb_key, dtype=np.float32))
 
         fixed_size_example = {}
         seq_mask = None
