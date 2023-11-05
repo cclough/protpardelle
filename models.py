@@ -123,8 +123,8 @@ class CoordinateDenoiser(nn.Module):
         noisy_coords: TensorType["b n a x", float],
         noise_level: TensorType["b", float],
         seq_mask: TensorType["b n", float],
-        rxn: TensorType["b e", float],
-        rxn_cond_prob: float,
+        conformer: TensorType["b e", float],
+        conformer_cond_prob: float,
         residue_index: Optional[TensorType["b n", int]] = None,
         struct_self_cond: Optional[TensorType["b n a x", float]] = None,
         struct_crop_cond: Optional[TensorType["b n a x", float]] = None,
@@ -149,7 +149,7 @@ class CoordinateDenoiser(nn.Module):
             emb = torch.cat([emb, struct_self_cond], -1)
 
         # Run neural network
-        emb = self.net(emb, noise_cond, seq_mask=seq_mask, rxn=rxn, conformer_cond_prob=conformer_cond_prob, residue_index=residue_index)
+        emb = self.net(emb, noise_cond, seq_mask=seq_mask, conformer=conformer, conformer_cond_prob=conformer_cond_prob, residue_index=residue_index)
         
         # Preconditioning from Karras et al.
         out_scale = noise_level * actual_var_data**0.5 / torch.sqrt(var_noisy_coords)
@@ -482,7 +482,7 @@ class Protpardelle(nn.Module):
 
 
 
-            # Do Rxn CFG
+            # Do Conformer CFG
             guidance_scale = 4.0
             uncond_x0 = guidance_in_conformer
             uncond_score = (xt_in - uncond_x0) / utils.expand(
@@ -690,7 +690,7 @@ class Protpardelle(nn.Module):
                 )
 
 
-            # Uncond For Rxn CFG
+            # Uncond For Conformer CFG
             uncond_x0_conformer, _, _, _ = self.forward(
                 noisy_coords=xt,
                 noise_level=sigma,

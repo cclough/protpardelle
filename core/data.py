@@ -176,6 +176,8 @@ class Dataset(data.Dataset):
         self.overfit = overfit
         self.short_epoch = short_epoch
         self.se3_data_augment = se3_data_augment
+        import pandas as pd
+        self.df = pd.read_csv("/path/to.csv")
 
         with open(f"{self.pdb_path}/{mode}_pdb_keys.list") as f:
             self.pdb_keys = np.array(f.read().split("\n")[:-1])
@@ -207,7 +209,6 @@ class Dataset(data.Dataset):
         example = {}
 
         data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
-        conformer_file = f"{self.pdb_path}/conformers/{pdb_key}"
 
         # if self.pdb_path.endswith("cath_s40_dataset"):  # CATH pdbs
         #     data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
@@ -220,8 +221,6 @@ class Dataset(data.Dataset):
             example = utils.load_feats_from_pdb(data_file)
             coords_in = example["atom_positions"]
 
-            conformer = np.load(conformer_file)
-
         except FileNotFoundError:
             raise Exception(f"File {pdb_key} not found. Check if dataset is corrupted?")
         except RuntimeError:
@@ -231,11 +230,25 @@ class Dataset(data.Dataset):
         if self.se3_data_augment:
             coords_in = apply_random_se3(coords_in, atom_mask=example["atom_mask"])
 
+        conformer_type_dict = {
+            "type_1_name": 1
+            "type_2_name": 2
+            "type_3_name": 3
+            "type_4_name": 4
+        }
+        conformer_emb = eval(df[df['dataset_id']==dataset_id]['conformer_emb'].values[0])
+        conformer_emb = torch.Tensor(conformer_emb)
+        conformer_type = df[df['dataset_id']==dataset_id]['conformer_type'].values[0] 
+        conformer_type = conformer_type_dict[conformer_type]
+        conformer_type = torch.Tensor(conformer_type)
+        conformer = torch.concat([conformer_emb, conformer_type],axis=1)
+
         orig_size = coords_in.shape[0]
+        dataset_id = torch.Tensor(np.array(pdb_key, dtype=np.float32))
         example["coords_in"] = coords_in
         example["orig_size"] = torch.ones(1) * orig_size
-        example["conformer"] = torch.Tensor(conformer)
-        example['dataset_id'] = torch.Tensor(np.array(pdb_key, dtype=np.float32))
+        example["conformer"] = conformer
+        example['dataset_id'] = dataset_id
 
         fixed_size_example = {}
         seq_mask = None

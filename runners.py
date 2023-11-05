@@ -400,57 +400,34 @@ class ProtpardelleRunner(object):
 
 
 
-                    # conformer evaluation
-                    print("-------EVALUATION: conformer - TRAIN------>")
-
+                    print("-----Evaluation: Conformations - Train")
                     conformer_tm_scores_train = []
                     conformer_rmsd_scores_train = []
-
-                    for inputs in list(self.eval_dataloader_train)[:10]: # Assumes batchsize 1
-
+                    for inputs in list(self.eval_dataloader_train)[:10]: 
                         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-                        # get path of matching PDB
                         truth_path = f"{self.eval_dataloader_train.dataset.pdb_path}/dompdb/{int(inputs['dataset_id'])}"
                         truth = utils.load_feats_from_pdb(truth_path)
-
                         sampled_coords, seq_mask, tm_score, rmsd_score = evaluation.evaluate_backbone_conformer(inputs, self.model, truth)
-
                         conformer_tm_scores_train.append(tm_score)
                         conformer_rmsd_scores_train.append(rmsd_score)
-
                         evaluation.conformer_save_pdbs(self.save_dir, inputs['dataset_id'], "train", sampled_coords, seq_mask, tm_score, rmsd_score, truth_path, time_elapsed, gly_idx)
-
-                    # add TM score to eval metrics
                     sampling_metrics['conformer_tm_score_mean_train'] = np.mean(conformer_tm_scores_train)
                     sampling_metrics['conformer_rmsd_score_mean_train'] = np.mean(conformer_rmsd_scores_train)
 
 
-                    print("-------EVALUATION: conformer - TEST------>")
-
+                    print("------Evaluation: Conformations - Test")
                     conformer_tm_scores_eval = []
                     conformer_rmsd_scores_eval = []
-
-                    for inputs in list(self.eval_dataloader)[:10]: # Assumes batchsize 1
-
+                    for inputs in list(self.eval_dataloader)[:10]: 
                         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-                        # get path of matching PDB
                         truth_path = f"{self.eval_dataloader.dataset.pdb_path}/dompdb/{int(inputs['dataset_id'])}"
                         truth = utils.load_feats_from_pdb(truth_path)
-
                         sampled_coords, seq_mask, tm_score, rmsd_score = evaluation.evaluate_backbone_conformer(inputs, self.model, truth)
-
                         conformer_tm_scores_eval.append(tm_score)
                         conformer_rmsd_scores_eval.append(rmsd_score)
-
                         evaluation.conformer_save_pdbs(self.save_dir, inputs['dataset_id'], "eval", sampled_coords, seq_mask, tm_score, rmsd_score, truth_path, time_elapsed, gly_idx)
-
-                    # add TM score to eval metrics
                     sampling_metrics['conformer_tm_score_mean_eval'] = np.mean(conformer_tm_scores_eval)
                     sampling_metrics['conformer_rmsd_score_mean_eval'] = np.mean(conformer_rmsd_scores_eval)
-
-
 
 
 

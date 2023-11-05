@@ -584,16 +584,15 @@ class TimeCondUViT(nn.Module):
 
         # Add Conformers
         if conformer_cond_prob is not None:
+            conformer = nn.Linear(in_features=1280, out_features=256)(conformer)
             if np.random.uniform() < conformer_cond_prob:
                 x = torch.concat([conformer.unsqueeze(1), x], axis=1)
             else:
-                x = torch.concat([torch.zeros_like(rxn.unsqueeze(1)), x], axis=1)
+                x = torch.concat([torch.zeros_like(conformer.unsqueeze(1)), x], axis=1)
             
-            # print("CONFORMER VECTOR INJECTED MEAN: {}, STD: {}, MAX: {}. RXN COND PROB: {}".format(rxn.mean(), rxn.std(), rxn.max(), rxn_cond_prob))
-            seq_mask = torch.concat([torch.ones_like(rxn[:, 0:1]), seq_mask], axis=1)
-            residue_index = torch.concat([torch.zeros_like(rxn[:, 0:1]), residue_index], axis=1)
+            seq_mask = torch.concat([torch.ones_like(conformer[:, 0:1]), seq_mask], axis=1)
+            residue_index = torch.concat([torch.zeros_like(conformer[:, 0:1]), residue_index], axis=1)
         else:
-            # print("CONFORMER VECTOR NOT INJECTED. I REPEAT *NOT INJECTED* (rxn_cond_prob is None)")
             pass
 
 
@@ -609,7 +608,7 @@ class TimeCondUViT(nn.Module):
         )
 
 
-        # Remove Rxns
+        # Remove Conformer
         if conformer_cond_prob is not None:
             x = x[:, 1:, :]
             seq_mask = seq_mask[:, 1:]
