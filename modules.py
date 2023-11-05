@@ -555,7 +555,7 @@ class TimeCondUViT(nn.Module):
             )
 
     def forward(
-        self, coords, time_cond, pair_bias=None, seq_mask=None, residue_index=None
+        self, coords, time_cond, conformer=None, conformer_cond_prob=None, , pair_bias=None, seq_mask=None, residue_index=None
     ):
         if self.n_conv_layers > 0:  # pad up to even dims
             coords = F.pad(coords, (0, 0, 0, 0, 0, 1, 0, 0))
@@ -578,6 +578,28 @@ class TimeCondUViT(nn.Module):
         #     x = x + pos_emb
         if seq_mask is not None and x.shape[1] == seq_mask.shape[1]:
             x *= seq_mask[..., None]
+
+
+
+
+        # Add Conformers
+        if conformer_cond_prob is not None:
+            if np.random.uniform() < conformer_cond_prob:
+                x = torch.concat([conformer.unsqueeze(1), x], axis=1)
+            else:
+                x = torch.concat([torch.zeros_like(rxn.unsqueeze(1)), x], axis=1)
+            
+            # print("CONFORMER VECTOR INJECTED MEAN: {}, STD: {}, MAX: {}. RXN COND PROB: {}".format(rxn.mean(), rxn.std(), rxn.max(), rxn_cond_prob))
+            seq_mask = torch.concat([torch.ones_like(rxn[:, 0:1]), seq_mask], axis=1)
+            residue_index = torch.concat([torch.zeros_like(rxn[:, 0:1]), residue_index], axis=1)
+        else:
+            # print("CONFORMER VECTOR NOT INJECTED. I REPEAT *NOT INJECTED* (rxn_cond_prob is None)")
+            pass
+
+
+
+
+
         x = self.transformer(
             x,
             time=time_cond,
@@ -585,6 +607,16 @@ class TimeCondUViT(nn.Module):
             seq_mask=seq_mask,
             residue_index=residue_index,
         )
+
+
+        # Remove Rxns
+        if conformer_cond_prob is not None:
+            x = x[:, 1:, :]
+            seq_mask = seq_mask[:, 1:]
+            residue_index = residue_index[:, 1:]
+
+
+
         x = self.from_patch(x)
 
         for i, layer in enumerate(self.up_conv):
