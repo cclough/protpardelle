@@ -304,6 +304,7 @@ def compute_bond_length_metric(
     return np.mean(list(all_errors.values()))
 
 
+
 def evaluate_backbone_generation(
     model,
     n_samples=1,
@@ -311,12 +312,14 @@ def evaluate_backbone_generation(
     struct_pred_model=None,
     tokenizer=None,
     sample_length_range=(50, 512),
+    # conformer=None,
 ):
     sampling_config = sampling.default_backbone_sampling_config()
     trimmed_coords, seq_mask = sampling.draw_backbone_samples(
         model,
         n_samples=n_samples,
         sample_length_range=sample_length_range,
+        # conformer=conformer,
         **vars(sampling_config),
     )
     sc_metrics, best_idx, aux = compute_self_consistency(
@@ -330,6 +333,55 @@ def evaluate_backbone_generation(
     all_metrics = {**sc_metrics, **dssp_metrics}
     all_metrics = {f"bb_{k}": v for k, v in all_metrics.items()}
     return all_metrics, (trimmed_coords, seq_mask, best_idx, aux["pred"], aux["seqs"])
+
+
+def evaluate_backbone_conformer(inputs, model, truth):
+
+    seq_mask = model.make_seq_mask_for_sampling(
+        n_samples=1,
+        min_len=inputs["orig_size"].cpu().item(),
+        max_len=inputs["orig_size"].cpu().item(),
+    )
+    sampling_kwargs = vars(sampling.default_backbone_sampling_config())
+
+    # get coords back
+    conformer = inputs["conformer"]
+    bb_aux = model.sample(
+        seq_mask=seq_mask, conformer=conformer, return_last=False, return_aux=True, **sampling_kwargs
+    )
+
+    sampled_coords = bb_aux['x']
+    seq_mask = bb_aux['seq_mask'].int()
+
+    # compute TM & RMSD score
+    tm_score = compute_structure_metric(truth['atom_positions'].to("cpu"), sampled_coords[0].to("cpu"), metric="tm_score", atom_mask=None).item()
+    rmsd_score = compute_structure_metric(truth['atom_positions'].to("cpu"), sampled_coords[0].to("cpu"), metric="ca_rmsd", atom_mask=None).item()
+
+    return sampled_coords, seq_mask, tm_score, rmsd_score
+
+
+def conformer_save_pdbs(save_dir, dataset_id, run_type, sampled_coords, seq_mask, tm_score, rmsd_score, truth_path, time_elapsed, gly_idx):
+    # Save PDBs
+    results_conformer_dir = f"{save_dir}/results_conformer"
+    if not os.path.exists(results_conformer_dir):
+        os.mkdir(results_conformer_dir)
+
+    results_conformer_dir_runtype = f"{results_conformer_dir}/{run_type}"
+    if not os.path.exists(results_conformer_dir_runtype):
+        os.mkdir(results_conformer_dir_runtype)
+    
+    if torch.isnan(sampled_coords[0]).sum() == 0:
+        gly_aatype = seq_mask[0, seq_mask[0] == 1] * gly_idx
+        utils.write_coords_to_pdb(
+            sampled_coords[0],
+            f"{results_conformer_dir_runtype}/time{int(time_elapsed)}_fsid-{int(dataset_id)}_tm{round(tm_score, 2)}_rmsd{round(rmsd_score, 2)}.pdb",
+            batched=False,
+            aatype=gly_aatype,
+        )
+
+        # Save truth too, for easy reference
+        shutil.copy(truth_path, f"{results_conformer_dir_runtype}/time{int(time_elapsed)}_fsid-{int(dataset_id)}_truth.pdb")
+
 
 
 def evaluate_allatom_generation(

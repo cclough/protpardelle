@@ -119,6 +119,7 @@ class ProtpardelleRunner(object):
         aatype = inputs["aatype"]
         aatype_oh = F.one_hot(aatype, self.config.data.n_aatype_tokens).float()
         atom_mask = inputs["atom_mask"]
+        conformer = inputs["conformer"]
         device = coords.device
         bs = coords.shape[0]
         noising_atom_mask = None
@@ -163,6 +164,7 @@ class ProtpardelleRunner(object):
             "seq_mask": seq_mask,
             "residue_index": inputs["residue_index"],
             "struct_crop_cond": struct_crop_cond,
+            "conformer": conformer
         }
         forward_fn = self.forward if is_training else self.model
         struct_self_cond, seq_self_cond = None, None
@@ -181,13 +183,22 @@ class ProtpardelleRunner(object):
                 seq_self_cond=seq_self_cond,
             )
         else:
+
+            if is_training:
+                conformer_cond_prob = 0.9
+            else:
+                conformer_cond_prob = 1.0
+
+
+
             if np.random.uniform() < self.config.train.self_cond_train_prob:
                 with torch.no_grad():
-                    _, _, struct_self_cond, seq_self_cond = forward_fn(**model_inputs)
+                    _, _, struct_self_cond, seq_self_cond = forward_fn(**model_inputs, conformer_cond_prob=conformer_cond_prob))
             denoised_coords, pred_seq_logprobs, _, _ = forward_fn(
                 **model_inputs,
                 struct_self_cond=struct_self_cond,
                 seq_self_cond=seq_self_cond,
+                conformer_cond_prob=conformer_cond_prob
             )
 
         loss = 0.0
@@ -267,84 +278,90 @@ class ProtpardelleRunner(object):
             with torch.no_grad():
                 gly_idx = residue_constants.restype_order["G"]
 
-                # Validation set metrics
-                noise_level_ts = self.config.train.eval_loss_t
+                # # Validation set metrics
+                # noise_level_ts = self.config.train.eval_loss_t
+                # eval_metrics = {}
+                # eval_losses = {}
+                # # Assumes batchsize 1
+                # for inputs in self.eval_dataloader:
+                #     if np.random.uniform() > self.config.train.subsample_eval_set:
+                #         continue
+                #     inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                #     for t in noise_level_ts:
+                #         batched_t = t * torch.ones(inputs["coords_in"].shape[0]).to(
+                #             self.model.device
+                #         )
+                #         eval_losses.setdefault(str(t), []).append(
+                #             self.compute_loss(inputs, time=batched_t, is_training=False)
+                #             .detach()
+                #             .cpu()
+                #             .item()
+                #         )
+
+                # for k, v in eval_metrics.items():
+                #     eval_metrics[k] = mean(v)
+
+                # for k, v in eval_losses.items():
+                #     eval_metrics[f"{k}_eval_loss"] = mean(v)
+                # eval_metrics["avg_eval_loss"] = mean(
+                #     [eval_metrics[f"{str(t)}_eval_loss"] for t in noise_level_ts]
+                # )
                 eval_metrics = {}
-                eval_losses = {}
-                # Assumes batchsize 1
-                for inputs in self.eval_dataloader:
-                    if np.random.uniform() > self.config.train.subsample_eval_set:
-                        continue
-                    inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                    for t in noise_level_ts:
-                        batched_t = t * torch.ones(inputs["coords_in"].shape[0]).to(
-                            self.model.device
-                        )
-                        eval_losses.setdefault(str(t), []).append(
-                            self.compute_loss(inputs, time=batched_t, is_training=False)
-                            .detach()
-                            .cpu()
-                            .item()
-                        )
 
-                for k, v in eval_metrics.items():
-                    eval_metrics[k] = mean(v)
-
-                for k, v in eval_losses.items():
-                    eval_metrics[f"{k}_eval_loss"] = mean(v)
-                eval_metrics["avg_eval_loss"] = mean(
-                    [eval_metrics[f"{str(t)}_eval_loss"] for t in noise_level_ts]
-                )
-
-                # Sampling metrics
+                # # Sampling metrics
                 sampling_metrics = {}
 
                 if self.model.task == "allatom":
-                    try:
-                        aa_metrics, aa_aux = evaluation.evaluate_allatom_generation(
-                            self.model,
-                            n_samples=self.config.train.n_eval_samples,
-                            sample_length_range=self.config.train.sample_length_range,
-                            struct_pred_model=self.struct_pred_model,
-                            tokenizer=self.tokenizer,
-                        )
-                        sampling_metrics = {**sampling_metrics, **aa_metrics}
+                    # try:
+                    #     aa_metrics, aa_aux = evaluation.evaluate_allatom_generation(
+                    #         self.model,
+                    #         n_samples=self.config.train.n_eval_samples,
+                    #         sample_length_range=self.config.train.sample_length_range,
+                    #         struct_pred_model=self.struct_pred_model,
+                    #         tokenizer=self.tokenizer,
+                    #     )
+                    #     sampling_metrics = {**sampling_metrics, **aa_metrics}
 
-                        # Save some samples and the ESMFold predictions
-                        (
-                            trimmed_coords,
-                            trimmed_aatype,
-                            trimmed_atom_mask,
-                            pred_coords,
-                            best_idx,
-                        ) = aa_aux
-                        rand_samp_idx = (
-                            best_idx + 1
-                        ) % self.config.train.n_eval_samples
-                        for i, idx in enumerate([best_idx, rand_samp_idx]):
-                            if torch.isnan(trimmed_coords[idx]).sum() == 0:
-                                utils.write_coords_to_pdb(
-                                    trimmed_coords[idx],
-                                    f"{self.save_dir}/results/time{int(time_elapsed)+i}_allatom_samp{idx}.pdb",
-                                    batched=False,
-                                    aatype=trimmed_aatype[idx],
-                                    atom_mask=trimmed_atom_mask[idx],
-                                    conect=True,
-                                )
-                            if torch.isnan(pred_coords[idx]).sum() == 0:
-                                utils.write_coords_to_pdb(
-                                    pred_coords[idx],
-                                    f"{self.save_dir}/results/time{int(time_elapsed)+i}_allatom_pred{idx}.pdb",
-                                    batched=False,
-                                    aatype=trimmed_aatype[idx],
-                                    atom_mask=trimmed_atom_mask[idx],
-                                    conect=True,
-                                )
+                    #     # Save some samples and the ESMFold predictions
+                    #     (
+                    #         trimmed_coords,
+                    #         trimmed_aatype,
+                    #         trimmed_atom_mask,
+                    #         pred_coords,
+                    #         best_idx,
+                    #     ) = aa_aux
+                    #     rand_samp_idx = (
+                    #         best_idx + 1
+                    #     ) % self.config.train.n_eval_samples
+                    #     for i, idx in enumerate([best_idx, rand_samp_idx]):
+                    #         if torch.isnan(trimmed_coords[idx]).sum() == 0:
+                    #             utils.write_coords_to_pdb(
+                    #                 trimmed_coords[idx],
+                    #                 f"{self.save_dir}/results/time{int(time_elapsed)+i}_allatom_samp{idx}.pdb",
+                    #                 batched=False,
+                    #                 aatype=trimmed_aatype[idx],
+                    #                 atom_mask=trimmed_atom_mask[idx],
+                    #                 conect=True,
+                    #             )
+                    #         if torch.isnan(pred_coords[idx]).sum() == 0:
+                    #             utils.write_coords_to_pdb(
+                    #                 pred_coords[idx],
+                    #                 f"{self.save_dir}/results/time{int(time_elapsed)+i}_allatom_pred{idx}.pdb",
+                    #                 batched=False,
+                    #                 aatype=trimmed_aatype[idx],
+                    #                 atom_mask=trimmed_atom_mask[idx],
+                    #                 conect=True,
+                    #             )
 
-                    except RuntimeError as e:
-                        print(f"Skipping allatom eval, due to error {e}...")
+                    # except RuntimeError as e:
+                    #     print(f"Skipping allatom eval, due to error {e}...")
+                    pass
+
 
                 if self.model.task == "backbone":
+
+                    print("-------EVALUATION: NORMAL------>")
+
                     bb_metrics, bb_aux = evaluation.evaluate_backbone_generation(
                         self.model,
                         n_samples=self.config.train.n_eval_samples,
@@ -354,7 +371,6 @@ class ProtpardelleRunner(object):
                         tokenizer=self.tokenizer,
                     )
                     sampling_metrics = {**sampling_metrics, **bb_metrics}
-
                     # Save some samples
                     (
                         sampled_coords,
@@ -381,6 +397,62 @@ class ProtpardelleRunner(object):
                                 batched=False,
                                 aatype=designed_seq,
                             )
+
+
+
+                    # conformer evaluation
+                    print("-------EVALUATION: conformer - TRAIN------>")
+
+                    conformer_tm_scores_train = []
+                    conformer_rmsd_scores_train = []
+
+                    for inputs in list(self.eval_dataloader_train)[:10]: # Assumes batchsize 1
+
+                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                        # get path of matching PDB
+                        truth_path = f"{self.eval_dataloader_train.dataset.pdb_path}/dompdb/{int(inputs['dataset_id'])}"
+                        truth = utils.load_feats_from_pdb(truth_path)
+
+                        sampled_coords, seq_mask, tm_score, rmsd_score = evaluation.evaluate_backbone_conformer(inputs, self.model, truth)
+
+                        conformer_tm_scores_train.append(tm_score)
+                        conformer_rmsd_scores_train.append(rmsd_score)
+
+                        evaluation.conformer_save_pdbs(self.save_dir, inputs['dataset_id'], "train", sampled_coords, seq_mask, tm_score, rmsd_score, truth_path, time_elapsed, gly_idx)
+
+                    # add TM score to eval metrics
+                    sampling_metrics['conformer_tm_score_mean_train'] = np.mean(conformer_tm_scores_train)
+                    sampling_metrics['conformer_rmsd_score_mean_train'] = np.mean(conformer_rmsd_scores_train)
+
+
+                    print("-------EVALUATION: conformer - TEST------>")
+
+                    conformer_tm_scores_eval = []
+                    conformer_rmsd_scores_eval = []
+
+                    for inputs in list(self.eval_dataloader)[:10]: # Assumes batchsize 1
+
+                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                        # get path of matching PDB
+                        truth_path = f"{self.eval_dataloader.dataset.pdb_path}/dompdb/{int(inputs['dataset_id'])}"
+                        truth = utils.load_feats_from_pdb(truth_path)
+
+                        sampled_coords, seq_mask, tm_score, rmsd_score = evaluation.evaluate_backbone_conformer(inputs, self.model, truth)
+
+                        conformer_tm_scores_eval.append(tm_score)
+                        conformer_rmsd_scores_eval.append(rmsd_score)
+
+                        evaluation.conformer_save_pdbs(self.save_dir, inputs['dataset_id'], "eval", sampled_coords, seq_mask, tm_score, rmsd_score, truth_path, time_elapsed, gly_idx)
+
+                    # add TM score to eval metrics
+                    sampling_metrics['conformer_tm_score_mean_eval'] = np.mean(conformer_tm_scores_eval)
+                    sampling_metrics['conformer_rmsd_score_mean_eval'] = np.mean(conformer_rmsd_scores_eval)
+
+
+
+
 
                 log_dict = {**eval_metrics, **sampling_metrics}
 
