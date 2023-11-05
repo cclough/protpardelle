@@ -179,23 +179,13 @@ class Dataset(data.Dataset):
         import pandas as pd
         self.df = pd.read_csv(f"{self.pdb_path}/{mode}.csv")
 
-        # with open(f"{self.pdb_path}/{mode}_pdb_keys.list") as f:
-        #     self.pdb_keys = np.array(f.read().split("\n")[:-1])
         self.df = self.df.assign(pdb_key=self.df.cluster_id.str[:-5] + "/" + self.df.file_name.str.split('/', expand=True)[2])
         self.df = self.df.dropna(subset=["pdb_key"])
         self.df = self.df[self.df.pdb_key != "2RU3_A/2RU3-2-B_fixed.pdb"] #Skip RNA
         self.df = self.df[~self.df.cluster_id.isin(["2RU3_A_seqs", "4ZKA_A_seqs", "451C_A_seqs", "4B2B_B_seqs", "1FJE_B_seqs", "1MSF_C_seqs"])]
-
         self.pdb_keys = self.df.pdb_key.tolist()
-
-
         self.df = self.df.set_index("pdb_key", drop=False)
         self.df = self.df.assign(num_index=list(range(len(self.df))))
-        #print(self.df.columns)
-
-
-
-
 
 
         if overfit > 0:
@@ -224,15 +214,7 @@ class Dataset(data.Dataset):
     def get_item(self, pdb_key):
         example = {}
 
-        #data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
         data_file = f"{self.pdb_path}/{pdb_key}"
-
-        # if self.pdb_path.endswith("cath_s40_dataset"):  # CATH pdbs
-        #     data_file = f"{self.pdb_path}/dompdb/{pdb_key}"
-        # elif self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
-        #     data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
-        # else:
-        #     raise Exception("Invalid pdb path.")
 
         try:
             example = utils.load_feats_from_pdb(data_file)
@@ -240,7 +222,8 @@ class Dataset(data.Dataset):
 
         except FileNotFoundError:
             raise Exception(f"File {pdb_key} not found. Check if dataset is corrupted?")
-        except RuntimeError:
+        except (RuntimeError,ValueError):
+            print(pdb_key)
             return None
 
         # Apply data augmentation
@@ -262,21 +245,9 @@ class Dataset(data.Dataset):
         try:
             conformer_df = self.df.loc[pdb_key]
         except KeyError:
-            print(self.df)
-            print(self.df.index)
-            print(pdb_key)
             raise
         conformer_emb =  eval(str(conformer_df.emb).replace("  ", ",").replace(" ",",").replace("\n",",").replace(",,",",").replace("[,", "[").replace(",]", "]")) #eval(conformer_df.emb.replace('\n', '').replace(' ', ',').replace(',,',',').replace('[,', '['))
         conformer_emb = torch.Tensor(conformer_emb)
-
-        # conformer_type = str(conformer_df.causes).split(";")[0] #df[df['dataset_id']==dataset_id]['conformer_type'].values[0]
-        # conformer_type = conformer_type_dict.get(conformer_type.lower(), 0)
-        # conformer_type = torch.Tensor(conformer_type)
-        #
-        # conformer = torch.concat([conformer_emb, conformer_type])
-
-        # print(conformer_type.shape)
-
 
         conformer = conformer_emb
 
@@ -305,8 +276,6 @@ class Dataset(data.Dataset):
                 example_out[k] = v.float()
             elif k in FEATURES_LONG:
                 example_out[k] = v.long()
-        
-        print(example_out)
 
         return example_out
 

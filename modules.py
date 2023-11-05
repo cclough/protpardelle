@@ -587,10 +587,14 @@ class TimeCondUViT(nn.Module):
         # Add Conformers
         if conformer_cond_prob is not None:
             #conformer = torch.nn.functional.linear(conformer, (1280, 256))
-            print(conformer)
-            assert 0, conformer.shape
-            conformer = conformer.reshape(1, 256, -1)
-            conformer = conformer.mean(dim=2)
+            #print(conformer)
+            #assert 0, conformer.shape
+ 
+            # conformer = conformer.unsqueeze(1)
+            # conformer = F.interpolate(conformer, size=(1, 256), mode='linear', align_corners=False)
+            # conformer = conformer.squeeze(1)
+            conformer = conformer[:, :256]
+
             if np.random.uniform() < conformer_cond_prob:
                 x = torch.concat([conformer.unsqueeze(1), x], axis=1)
             else:
