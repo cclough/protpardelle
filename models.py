@@ -57,6 +57,7 @@ class MiniMPNN(nn.Module):
         residue_index: TensorType["b n", int],
         seq_self_cond: Optional[TensorType["b n t", float]] = None,  # logprobs
         return_embeddings: bool = False,
+
     ):
         coords_noise_level_scaled = 0.25 * torch.log(coords_noise_level)
         noise_cond = self.noise_block(coords_noise_level_scaled)
@@ -150,7 +151,7 @@ class CoordinateDenoiser(nn.Module):
 
         # Run neural network
         emb = self.net(emb, noise_cond, seq_mask=seq_mask, conformer=conformer, conformer_cond_prob=conformer_cond_prob, residue_index=residue_index)
-        
+
         # Preconditioning from Karras et al.
         out_scale = noise_level * actual_var_data**0.5 / torch.sqrt(var_noisy_coords)
         skip_scale = actual_var_data / var_noisy_coords
@@ -281,7 +282,7 @@ class Protpardelle(nn.Module):
         noisy_coords: TensorType["b n a x", float],
         noise_level: TensorType["b", float],
         seq_mask: TensorType["b n", float],
-        conform: TensorType["b e", float],
+        conformer: TensorType["b e", float],
         residue_index: TensorType["b n", int],
         struct_self_cond: Optional[TensorType["b n a x", float]] = None,
         struct_crop_cond: Optional[TensorType["b n a x", float]] = None,
@@ -701,7 +702,7 @@ class Protpardelle(nn.Module):
                 seq_self_cond=s_self_cond,
                 run_mpnn_model=run_mpnn,
                 conformer_cond_prob=1.0,
-            )      
+            )
 
 
 

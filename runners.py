@@ -193,7 +193,7 @@ class ProtpardelleRunner(object):
 
             if np.random.uniform() < self.config.train.self_cond_train_prob:
                 with torch.no_grad():
-                    _, _, struct_self_cond, seq_self_cond = forward_fn(**model_inputs, conformer_cond_prob=conformer_cond_prob))
+                    _, _, struct_self_cond, seq_self_cond = forward_fn(**model_inputs, conformer_cond_prob=conformer_cond_prob)
             denoised_coords, pred_seq_logprobs, _, _ = forward_fn(
                 **model_inputs,
                 struct_self_cond=struct_self_cond,

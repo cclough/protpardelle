@@ -554,8 +554,10 @@ class TimeCondUViT(nn.Module):
                 nn.Conv2d(block_out, channels // 2, 3, 1, 1),
             )
 
+        #self.conformer_linear = nn.Linear(in_features=1280, out_features=256)
+
     def forward(
-        self, coords, time_cond, conformer=None, conformer_cond_prob=None, , pair_bias=None, seq_mask=None, residue_index=None
+        self, coords, time_cond, conformer=None, conformer_cond_prob=None, pair_bias=None, seq_mask=None, residue_index=None
     ):
         if self.n_conv_layers > 0:  # pad up to even dims
             coords = F.pad(coords, (0, 0, 0, 0, 0, 1, 0, 0))
@@ -584,12 +586,16 @@ class TimeCondUViT(nn.Module):
 
         # Add Conformers
         if conformer_cond_prob is not None:
-            conformer = nn.Linear(in_features=1280, out_features=256)(conformer)
+            #conformer = torch.nn.functional.linear(conformer, (1280, 256))
+            print(conformer)
+            assert 0, conformer.shape
+            conformer = conformer.reshape(1, 256, -1)
+            conformer = conformer.mean(dim=2)
             if np.random.uniform() < conformer_cond_prob:
                 x = torch.concat([conformer.unsqueeze(1), x], axis=1)
             else:
                 x = torch.concat([torch.zeros_like(conformer.unsqueeze(1)), x], axis=1)
-            
+
             seq_mask = torch.concat([torch.ones_like(conformer[:, 0:1]), seq_mask], axis=1)
             residue_index = torch.concat([torch.zeros_like(conformer[:, 0:1]), residue_index], axis=1)
         else:

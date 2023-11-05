@@ -695,14 +695,20 @@ def get_3state_dssp(pdb=None, coords=None):
 
 
 def load_feats_from_pdb(
-    pdb, bb_atoms=["N", "CA", "C", "O"], load_atom73=False, **kwargs
+    pdb_in, bb_atoms=["N", "CA", "C", "O"], load_atom73=False, **kwargs
 ):
+
     feats = {}
-    with open(pdb, "r") as f:
+    with open(pdb_in, "r") as f:
         pdb_str = f.read()
     protein_obj = protein.from_pdb_string(pdb_str, **kwargs)
     bb_idxs = [residue_constants.atom_order[a] for a in bb_atoms]
-    bb_coords = torch.from_numpy(protein_obj.atom_positions[:, bb_idxs])
+    try:
+        bb_coords = torch.from_numpy(protein_obj.atom_positions[:, bb_idxs])
+    except IndexError:
+        print(pdb_in)
+        print(protein_obj.atom_positions.shape)
+        raise RuntimeError
     feats["bb_coords"] = bb_coords.float()
     for k, v in vars(protein_obj).items():
         feats[k] = torch.Tensor(v)
