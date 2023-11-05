@@ -123,6 +123,8 @@ class CoordinateDenoiser(nn.Module):
         noisy_coords: TensorType["b n a x", float],
         noise_level: TensorType["b", float],
         seq_mask: TensorType["b n", float],
+        rxn: TensorType["b e", float],
+        rxn_cond_prob: float,
         residue_index: Optional[TensorType["b n", int]] = None,
         struct_self_cond: Optional[TensorType["b n a x", float]] = None,
         struct_crop_cond: Optional[TensorType["b n a x", float]] = None,
@@ -147,8 +149,8 @@ class CoordinateDenoiser(nn.Module):
             emb = torch.cat([emb, struct_self_cond], -1)
 
         # Run neural network
-        emb = self.net(emb, noise_cond, seq_mask=seq_mask, residue_index=residue_index)
-
+        emb = self.net(emb, noise_cond, seq_mask=seq_mask, rxn=rxn, conformer_cond_prob=conformer_cond_prob, residue_index=residue_index)
+        
         # Preconditioning from Karras et al.
         out_scale = noise_level * actual_var_data**0.5 / torch.sqrt(var_noisy_coords)
         skip_scale = actual_var_data / var_noisy_coords
@@ -279,12 +281,14 @@ class Protpardelle(nn.Module):
         noisy_coords: TensorType["b n a x", float],
         noise_level: TensorType["b", float],
         seq_mask: TensorType["b n", float],
+        conform: TensorType["b e", float],
         residue_index: TensorType["b n", int],
         struct_self_cond: Optional[TensorType["b n a x", float]] = None,
         struct_crop_cond: Optional[TensorType["b n a x", float]] = None,
         seq_self_cond: Optional[TensorType["b n t", float]] = None,  # logprobs
         run_struct_model: bool = True,
         run_mpnn_model: bool = True,
+        conformer_cond_prob: float = 0.0,
     ):
         """Main forward function for denoising/co-design.
 
@@ -311,6 +315,8 @@ class Protpardelle(nn.Module):
                 noisy_coords,
                 noise_level,
                 seq_mask,
+                conformer=conformer,
+                conformer_cond_prob=conformer_cond_prob,
                 residue_index=residue_index,
                 struct_self_cond=struct_self_cond,
                 struct_crop_cond=struct_crop_cond,
@@ -365,6 +371,7 @@ class Protpardelle(nn.Module):
         self,
         *,
         seq_mask: TensorType["b n", float] = None,
+        conformer: TensorType["b e", float] = None,
         n_samples: int = 1,
         min_len: int = 50,
         max_len: int = 512,
@@ -441,7 +448,7 @@ class Protpardelle(nn.Module):
             return_aux: return a dict of everything associated with the sampling run.
         """
 
-        def ode_step(sigma_in, sigma_next, xt_in, x0_pred, gamma, guidance_in=None):
+        def ode_step(sigma_in, sigma_next, xt_in, x0_pred, gamma, guidance_in=None, guidance_in_conformer=None):
             if gamma > 0:
                 t_hat = sigma_in + gamma * sigma_in
                 sigma_delta = torch.sqrt(t_hat**2 - sigma_in**2)
@@ -471,8 +478,27 @@ class Protpardelle(nn.Module):
                 )
                 uncond_score = uncond_score * utils.expand(mask, uncond_score)
                 score = guidance_scale * score + (1 - guidance_scale) * uncond_score
+
+
+
+
+            # Do Rxn CFG
+            guidance_scale = 4.0
+            uncond_x0 = guidance_in_conformer
+            uncond_score = (xt_in - uncond_x0) / utils.expand(
+                sigma_in.clamp(min=1e-6), xt_in
+            )
+            uncond_score = uncond_score * utils.expand(mask, uncond_score)
+            score = guidance_scale * score + (1 - guidance_scale) * uncond_score
+
+
+
+
             step = score * step_scale * utils.expand(sigma_next - sigma_in, score)
             new_xt = xt_in + step
+
+
+
             return new_xt
 
         def sample_aatype(logprobs):
@@ -631,11 +657,13 @@ class Protpardelle(nn.Module):
                 noisy_coords=xt,
                 noise_level=sigma,
                 seq_mask=seq_mask,
+                conformer=conformer,
                 residue_index=residue_index,
                 struct_self_cond=x_self_cond,
                 struct_crop_cond=crop_cond_coords,
                 seq_self_cond=s_self_cond,
                 run_mpnn_model=run_mpnn,
+                conformer_cond_prob=1.0
             )
 
             # Compute additional stuff for guidance
@@ -654,16 +682,33 @@ class Protpardelle(nn.Module):
                     noisy_coords=xt,
                     noise_level=sigma,
                     seq_mask=seq_mask,
+                    conformer=conformer,
                     residue_index=residue_index,
                     struct_self_cond=x_self_cond,
                     seq_self_cond=s_self_cond,
                     run_mpnn_model=run_mpnn,
                 )
 
+
+            # Uncond For Rxn CFG
+            uncond_x0_conformer, _, _, _ = self.forward(
+                noisy_coords=xt,
+                noise_level=sigma,
+                seq_mask=seq_mask,
+                conformer=torch.zeros_like(conformer),
+                residue_index=residue_index,
+                struct_self_cond=x_self_cond,
+                seq_self_cond=s_self_cond,
+                run_mpnn_model=run_mpnn,
+                conformer_cond_prob=1.0,
+            )      
+
+
+
             # Structure denoising step
             if not sidechain_mode:  # backbone
                 if sigma[0] > 0:
-                    xt = ode_step(sigma, sigma_next, xt, x0, gamma)
+                    xt = ode_step(sigma, sigma_next, xt, x0, gamma, guidance_in_conformer=uncond_x0_conformer)
                 else:
                     xt = x0
             else:  # allatom
